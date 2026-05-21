@@ -28,12 +28,11 @@ services:
       - WEBHOOK_URL=http://n8n:5678
       - OPENWA_SESSION_ID=${OPENWA_SESSION_ID}
       - OPENWA_API_KEY=${OPENWA_API_KEY}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
     restart: unless-stopped
-    depends_on:
-      - openwa
     networks:
       - bot-network
-
 networks:
   bot-network:
     driver: bridge
