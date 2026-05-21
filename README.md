@@ -6,7 +6,7 @@ Infraestructura Docker local que integra OpenWA (gateway WhatsApp HTTP API) con 
 
 ```
                   ┌─────────────────────────────────────┐
-                  │          Red: bot-network            │
+                  │          Red: bot-network           │
                   │                                     │
                   │  ┌──────────┐     ┌──────────────┐  │
                   │  │  openwa  │     │     n8n      │  │
@@ -15,14 +15,13 @@ Infraestructura Docker local que integra OpenWA (gateway WhatsApp HTTP API) con 
                   │  │ (nginx)  │     │   payload    │  │
                   │  └────┬─────┘     └──────┬───────┘  │
                   │       │                  │          │
-                  │       │                  │          │
                   │  POST /api/sessions/     │          │
                   │   :sessionId/messages/   │          │
                   │   send-text              │          │
                   └─────────────────────────────────────┘
                            │                         │
                     WhatsApp API              HTTP POST
-                  (webhooks baas              (mensajes
+                  (webhooks mensajes         (mensajes
                    recibidos)               entrantes)
 
 Browser ─── localhost:2886 (dashboard OpenWA)
@@ -41,9 +40,11 @@ API     ─── localhost:2785 (OpenWA REST API)
 
 ```
 whatsapp-bot/
-├── .env                        # Variables de entorno
+├── .env                        # Variables de entorno (no subir a git)
+├── .env.example                # Plantilla de variables de entorno
+├── .gitignore                  # Excluye data/ y .env del repositorio
 ├── docker-compose.yml          # Orquestación de servicios
-├── Dockerfile.openwa           # Imagen de OpenWA + nginx
+├── Dockerfile.openwa           # Imagen de OpenWA + nginx + Chromium
 ├── dashboard-nginx.conf        # Proxy inverso para dashboard
 ├── start-openwa.sh             # Script de arranque del contenedor
 ├── setup.sh                    # Script de inicialización post-arranque
@@ -51,35 +52,50 @@ whatsapp-bot/
 ├── n8n/
 │   └── workflows/
 │       └── ChatWhatsapp.json   # Workflow de n8n importable
-└── data/
+└── data/                       # Generado automáticamente, no subir a git
     ├── openwa/                 # Persistencia de sesiones WhatsApp
     └── n8n/                    # Persistencia de n8n
 ```
 
 ## Configuración del archivo .env
 
+Copia `.env.example` a `.env` y rellena los valores:
+
 ```env
-OPENWA_SESSION_ID=c5d487b7-c4de-4bea-98a6-048263bb294a
-OPENWA_API_KEY=dev-admin-key
-GROQ_API_KEY=gsk_tu_api_key_aqui
-N8N_ENCRYPTION_KEY=string_aleatorio_para_cifrado
+OPENWA_SESSION_ID=              # Se rellena tras crear la sesión (paso 4)
+OPENWA_API_KEY=                 # Se obtiene de data/openwa/.api-key (paso 3)
+GROQ_API_KEY=gsk_tu_api_key     # Consola de Groq: https://console.groq.com
+N8N_ENCRYPTION_KEY=             # Ver instrucciones abajo
 ```
 
-| Variable | Descripción | Cómo obtenerla |
-|---|---|---|
-| `OPENWA_SESSION_ID` | ID de la sesión de WhatsApp en OpenWA | Se crea desde el dashboard (`localhost:2886`) o via API |
-| `OPENWA_API_KEY` | Clave de API de OpenWA | Se genera automáticamente al arrancar OpenWA. Se lee de `data/openwa/.api-key` |
-| `GROQ_API_KEY` | API key de Groq (para el modelo Llama 3.1 8B) | Consola de Groq: https://console.groq.com |
-| `N8N_ENCRYPTION_KEY` | Clave de cifrado interno de n8n (credenciales, etc.) | Generar con: `openssl rand -hex 32` |
+### Cómo obtener N8N_ENCRYPTION_KEY
 
-## Despliegue paso a paso
+Hay dos situaciones posibles:
+
+**Instalación desde cero** (la carpeta `data/n8n/` no existe todavía): genera una clave aleatoria antes de levantar los contenedores:
+
+```bash
+openssl rand -hex 32
+```
+
+Pega el resultado en `N8N_ENCRYPTION_KEY` del `.env` antes de hacer `docker compose up`.
+
+**n8n ya arrancó antes** sin `N8N_ENCRYPTION_KEY` configurada: n8n generó su propia clave y la guardó en `data/n8n/config`. Léela desde ahí y úsala en el `.env`:
+
+```bash
+cat ./data/n8n/config
+# Busca el campo "encryptionKey" y copia su valor
+```
+
+Si pones una clave diferente a la que ya está en `data/n8n/config`, n8n arrancará con el error `Mismatching encryption keys` y no iniciará.
+
+## Despliegue: primer arranque
 
 ### 1. Preparar variables de entorno
 
 ```bash
-cp .env.example .env   # si existe, o edita .env directamente
-# Rellena GROQ_API_KEY y N8N_ENCRYPTION_KEY
-# OPENWA_SESSION_ID y OPENWA_API_KEY se rellenan más tarde
+cp .env.example .env
+# Rellena GROQ_API_KEY y N8N_ENCRYPTION_KEY antes de continuar
 ```
 
 ### 2. Levantar los contenedores
@@ -88,76 +104,110 @@ cp .env.example .env   # si existe, o edita .env directamente
 docker compose up -d
 ```
 
-Esto construye la imagen de OpenWA (clona el repo, instala dependencias, construye el dashboard y la API) y arranca ambos servicios. El primer build tarda varios minutos.
+El primer build tarda varios minutos porque clona el repositorio de OpenWA, instala dependencias, compila TypeScript, construye el dashboard React e instala Chromium.
 
-### 3. Ejecutar setup
+### 3. Obtener la API key de OpenWA
 
 ```bash
 bash setup.sh
 ```
 
-El script espera a que OpenWA esté listo y muestra la API Key generada automáticamente.
+El script espera a que OpenWA esté listo y muestra la API key generada automáticamente. También puedes leerla directamente:
 
-### 4. Crear sesión de WhatsApp (manual)
+```bash
+cat ./data/openwa/.api-key
+```
+
+Copia el valor y ponlo en `OPENWA_API_KEY` de tu `.env`.
+
+### 4. Crear sesión de WhatsApp
 
 1. Abre `http://localhost:2886` en el navegador
-2. Inicia sesión con la API Key que aparece en `setup.sh`
-3. Crea una sesión nueva (ej: `mi-bot`)
-4. Inicia la sesión y escanea el código QR con WhatsApp
-5. Espera a que la sesión aparezca como `CONNECTED`
+2. Crea una sesión nueva (ej: `mi-bot`)
+3. Inicia la sesión y escanea el código QR con WhatsApp desde Dispositivos vinculados
+4. Espera a que la sesión aparezca como `CONNECTED`
+
+Anota el Session ID que aparece en el dashboard y ponlo en `OPENWA_SESSION_ID` de tu `.env`.
 
 ### 5. Registrar el webhook
 
 ```bash
-bash register-webhook.sh c5d487b7-c4de-4bea-98a6-048263bb294a
+bash register-webhook.sh TU_SESSION_ID
 ```
 
-Sustituye `c5d487b7...` por el ID de sesión que creaste. Esto registra en OpenWA un webhook que envía los mensajes entrantes a `http://n8n:5678/webhook/payload`.
+Esto registra en OpenWA un webhook que envía los mensajes entrantes a `http://n8n:5678/webhook/payload` por la red interna Docker.
 
-### 6. Actualizar .env y reiniciar n8n
+### 6. Reiniciar n8n con las variables actualizadas
+
+Después de rellenar `OPENWA_SESSION_ID` y `OPENWA_API_KEY` en el `.env`:
 
 ```bash
-# Edita .env con los valores del script
-OPENWA_SESSION_ID=c5d487b7-c4de-4bea-98a6-048263bb294a
-OPENWA_API_KEY=dev-admin-key
-
-# Luego reinicia n8n para que tome las variables
-docker compose restart n8n
+docker compose down
+docker compose up -d
 ```
 
-### 7. Importar y activar el workflow en n8n
+Usa `down` + `up` en lugar de `restart` para que los contenedores se recreen con la nueva configuración del `.env`.
+
+### 7. Importar el workflow en n8n
+
+```bash
+docker exec n8n n8n import:workflow --input=/workflows/ChatWhatsapp.json
+```
+
+Este paso solo es necesario la primera vez. El workflow queda guardado en `data/n8n/` y persiste en reinicios posteriores.
+
+### 8. Activar el workflow y configurar Groq
 
 1. Abre `http://localhost:5678`
-2. Crea cuenta o inicia sesión
-3. Ve a **Workflows** → **Import from File**
-4. Selecciona `n8n/workflows/ChatWhatsapp.json`
-5. Configura la credencial de Groq (necesitarás pegar tu `GROQ_API_KEY`)
-6. Activa el workflow con el toggle superior derecho
+2. Ve a **Workflows** y abre **ChatWhatsapp**
+3. Abre el nodo **Groq Chat Model**, haz clic en el campo Credential y selecciona o crea la credencial de Groq con tu `GROQ_API_KEY`
+4. Activa el workflow con el toggle superior derecho
 
-### 8. Probar
+### 9. Probar
 
-Envía un mensaje de WhatsApp al número conectado. El flujo es:
+Envía un mensaje de WhatsApp al número conectado. El flujo completo es:
 
 ```
-WhatsApp → OpenWA (webhook) → n8n (/webhook/payload)
-  → filtro fromMe===false → AI Agent (Groq Llama 3.1)
-  → HTTP Request a OpenWA POST /messages/send-text
-  → Respond to Webhook → WhatsApp
+WhatsApp → OpenWA (detecta mensaje entrante)
+  → POST http://n8n:5678/webhook/payload
+  → nodo IF filtra fromMe === false
+  → AI Agent procesa con Groq Llama 3.1 8B
+  → HTTP Request POST /api/sessions/:id/messages/send-text
+  → respuesta enviada de vuelta a WhatsApp
 ```
 
-Para ver logs:
+Para monitorear en tiempo real, ve a **Executions** en n8n o revisa los logs:
 
 ```bash
 docker compose logs n8n --tail=20
 docker compose logs openwa --tail=20
 ```
 
+## Reinicios posteriores
+
+Una vez que el sistema estuvo funcionando, los reinicios son más simples. Los datos de sesión de WhatsApp y los workflows de n8n persisten en `data/`.
+
+```bash
+docker compose down
+docker compose up -d
+```
+
+Si la sesión de OpenWA aparece como `FAILED` tras el reinicio, es porque Chromium no se cerró limpiamente. Haz clic en **Reconnect** desde el dashboard en `http://localhost:2886`. No es necesario volver a escanear el QR mientras `data/openwa/` no se haya borrado.
+
+Si Reconnect no funciona, reinicia el contenedor de OpenWA directamente para limpiar todo el caché de Chromium:
+
+```bash
+docker compose restart openwa
+```
+
+Luego vuelve a intentar Reconnect desde el dashboard.
+
 ## Puertos expuestos
 
 | Puerto | Servicio | Uso |
 |---|---|---|
-| `2785` | OpenWA API | API REST de OpenWA. Swagger docs en `/api/docs` |
-| `2886` | OpenWA Dashboard (nginx) | Panel web para gestionar sesiones |
+| `2785` | OpenWA API | API REST. Swagger docs en `/api/docs` |
+| `2886` | OpenWA Dashboard | Panel web para gestionar sesiones |
 | `5678` | n8n | Editor de workflows y webhook receptor |
 
 ## Rutas de API relevantes
@@ -170,6 +220,7 @@ docker compose logs openwa --tail=20
 | `GET` | `/api/docs` | Documentación Swagger |
 | `GET` | `/api/sessions` | Listar sesiones |
 | `POST` | `/api/sessions` | Crear sesión |
+| `POST` | `/api/sessions/:id/start` | Iniciar sesión |
 | `POST` | `/api/sessions/:id/webhooks` | Registrar webhook |
 | `GET` | `/api/sessions/:id/webhooks` | Listar webhooks |
 | `POST` | `/api/sessions/:id/messages/send-text` | Enviar mensaje de texto |
@@ -182,17 +233,26 @@ docker compose logs openwa --tail=20
 
 ## Variables de entorno en n8n
 
-El workflow importado usa `$env.NOMBRE_VARIABLE` para leer variables del entorno del contenedor n8n, definidas en `docker-compose.yml`:
+El workflow usa variables de entorno del contenedor para no hardcodear credenciales. Están configuradas en `docker-compose.yml` y leídas en los nodos con `$env.NOMBRE`:
 
-- `$env.OPENWA_SESSION_ID` — ID de sesión para enviar respuestas
-- `$env.OPENWA_API_KEY` — API Key para autenticar contra OpenWA
+- `$env.OPENWA_SESSION_ID` — ID de sesión para construir la URL de envío
+- `$env.OPENWA_API_KEY` — API key para autenticar contra OpenWA
+
+Si n8n bloquea el acceso a `$env` con el error `access to env vars denied`, la alternativa es usar n8n Variables nativas. Ve a **Settings > Variables** en n8n y crea:
+
+```
+OPENWA_SESSION_ID = tu_session_id
+OPENWA_API_KEY    = tu_api_key
+```
+
+Luego en los nodos usa `$vars.OPENWA_SESSION_ID` y `$vars.OPENWA_API_KEY` en lugar de `$env`.
 
 ## Comunicación entre contenedores
 
-Ambos servicios están en la red bridge `bot-network`. OpenWA se comunica con n8n mediante el nombre del contenedor:
+Ambos servicios están en la red bridge `bot-network`. Se comunican por nombre de contenedor:
 
-- **OpenWA → n8n**: `http://n8n:5678/webhook/payload` (registrado como webhook)
-- **n8n → OpenWA**: `http://openwa:2785/api/sessions/...` (en el nodo HTTP Request)
+- **OpenWA → n8n**: `http://n8n:5678/webhook/payload`
+- **n8n → OpenWA**: `http://openwa:2785/api/sessions/...`
 
 No uses `localhost` ni `host.docker.internal` para comunicación entre contenedores del mismo `docker-compose.yml`.
 
@@ -201,15 +261,18 @@ No uses `localhost` ni `host.docker.internal` para comunicación entre contenedo
 ### Dockerfile.openwa
 
 - Basado en `node:20-alpine`
-- Incluye Chromium para Puppeteer (necesario para WhatsApp Web)
-- Instala y construye el dashboard de OpenWA
-- Incluye nginx como proxy inverso para el dashboard
-- Parchea la validación `@IsUrl({ require_tld: false })` para aceptar nombres de contenedor Docker como URLs de webhook
+- Incluye Chromium y sus dependencias (`nss`, `freetype`, `harfbuzz`, `ca-certificates`, `ttf-freefont`) para Puppeteer
+- `PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true` evita que Puppeteer descargue su propio Chrome
+- `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser` apunta al Chromium del sistema
+- Compila el proyecto TypeScript con `npm run build`
+- Construye el dashboard React si existe `dashboard/package.json`
+- Parchea `@IsUrl({ require_tld: false })` en el DTO compilado para aceptar nombres de contenedor Docker como URLs de webhook
+- Incluye nginx como proxy inverso para el dashboard en el puerto 2886
 
 ### dashboard-nginx.conf
 
-Nginx escucha en puerto 2886 y:
-- Sirve los archivos estáticos del dashboard (`/app/dashboard/dist`)
+Nginx escucha en el puerto 2886 y:
+- Sirve los archivos estáticos del dashboard desde `/app/dashboard/dist`
 - Proxy inverso `/api/*` → `localhost:2785`
 - Proxy inverso `/socket.io/*` → `localhost:2785`
 
@@ -217,46 +280,83 @@ Nginx escucha en puerto 2886 y:
 
 Arranca nginx en background y la API de NestJS en foreground para mantener el contenedor vivo.
 
-### Workflow de n8n (ChatWhatsapp.json)
+### Workflow ChatWhatsapp.json
 
-Flujo:
 1. **Webhook** — Recibe POST en `/webhook/payload`
-2. **IF** — Filtra mensajes `fromMe === false` (ignora mensajes enviados por el propio bot)
-3. **AI Agent** — Agente conversacional con Groq (Llama 3.1 8B)
+2. **IF** — Filtra `fromMe === false` para ignorar mensajes enviados por el propio bot
+3. **AI Agent** — Agente conversacional con Groq (Llama 3.1 8B instant)
 4. **HTTP Request** — Envía la respuesta a OpenWA via `POST /messages/send-text`
 5. **Respond to Webhook** — Responde `{ status: "ok" }` a OpenWA
+
+## Seguridad y git
+
+El `.gitignore` excluye `data/` y `.env` del repositorio porque contienen:
+- Sesión autenticada de WhatsApp (`data/openwa/sessions/`)
+- Base de datos y credenciales cifradas de n8n (`data/n8n/`)
+- API keys en texto plano (`.env`)
+
+Usa `.env.example` como plantilla para documentar las variables necesarias sin exponer valores reales. Si accidentalmente haces commit del `.env`, limpia el historial antes de hacer push:
+
+```bash
+git rm --cached .env
+git commit --amend --no-edit
+git push origin main --force
+```
+
+Y rota inmediatamente cualquier API key que haya quedado expuesta.
 
 ## Troubleshooting
 
 ### "url must be a URL address" al registrar webhook
 
-El decorador `@IsUrl()` de `class-validator` exige un TLD (`.com`) por defecto. El Dockerfile parchea automáticamente esta validación. Si ya tienes el contenedor corriendo sin el parche:
+El decorador `@IsUrl()` de `class-validator` exige un TLD (`.com`) por defecto y rechaza `http://n8n:5678/...`. El Dockerfile parchea automáticamente esta validación con `require_tld: false`. Si el contenedor ya está corriendo sin el parche, aplícalo manualmente:
 
 ```bash
 docker exec openwa sed -i 's/(0, class_validator_1.IsUrl)()/(0, class_validator_1.IsUrl)({ require_tld: false })/g' /app/dist/modules/webhook/dto/webhook.dto.js
 docker compose restart openwa
 ```
 
-### La sesión de WhatsApp se desconecta
+### La sesión aparece como FAILED tras reiniciar
 
-Las sesiones persisten en `data/openwa/sessions/`. Si el contenedor se reconstruye sin el volumen, perderás la sesión. Asegúrate de que `docker-compose.yml` tenga el volumen mapeado:
+Chromium deja archivos de caché y procesos colgados cuando el contenedor se detiene bruscamente. La solución más efectiva es reiniciar el contenedor de OpenWA para limpiar todo el caché:
 
-```yaml
-volumes:
-  - ./data/openwa:/app/data
+```bash
+docker compose restart openwa
 ```
 
-### n8n no responde al webhook
+Luego desde el dashboard en `http://localhost:2886` haz clic en **Reconnect** sobre la sesión. No hace falta volver a escanear el QR si `data/openwa/` sigue intacto.
 
-1. Verifica que el workflow esté activo (toggle verde en n8n)
-2. Verifica que el webhook esté registrado:
-   ```bash
-   curl localhost:2785/api/sessions/TU_SESSION_ID/webhooks -H "X-API-Key: TU_API_KEY"
-   ```
-3. Revisa los logs: `docker compose logs n8n`
+### Error "Mismatching encryption keys" en n8n
+
+n8n ya tenía una clave guardada en `data/n8n/config` que no coincide con `N8N_ENCRYPTION_KEY` del `.env`. Lee la clave existente y úsala:
+
+```bash
+cat ./data/n8n/config
+# Copia el valor de encryptionKey y ponlo en N8N_ENCRYPTION_KEY del .env
+docker compose down && docker compose up -d
+```
 
 ### El agente IA no responde
 
 1. Verifica que `GROQ_API_KEY` esté configurada en `.env`
-2. En n8n, verifica que la credencial de Groq esté configurada en el workflow
-3. Prueba el nodo Groq individualmente desde el editor de n8n
+2. En n8n, abre el nodo **Groq Chat Model** y reasigna la credencial de Groq manualmente (el workflow importado puede tener un ID de credencial de otra instancia)
+3. Prueba la conexión desde **Settings > Credentials**
+
+### n8n no recibe mensajes de OpenWA
+
+1. Verifica que el workflow esté activo (toggle verde)
+2. Verifica que el webhook esté registrado en OpenWA:
+   ```bash
+   curl http://localhost:2785/api/sessions/TU_SESSION_ID/webhooks \
+     -H "X-API-Key: TU_API_KEY"
+   ```
+3. Verifica que la sesión de WhatsApp esté en estado `CONNECTED` en el dashboard
+
+### Cambios en docker-compose.yml no se aplican con restart
+
+`docker compose restart` solo reinicia el proceso dentro del contenedor existente sin aplicar cambios del compose ni del `.env`. Para aplicar cambios siempre usa:
+
+```bash
+docker compose down
+docker compose up -d
+```
