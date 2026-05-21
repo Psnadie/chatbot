@@ -1,0 +1,219 @@
+{
+  "name": "ChatWhatsapp",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://openwa:2785/api/sessions/{{ $env.OPENWA_SESSION_ID }}/messages/send-text",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.OPENWA_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chatId",
+              "value": "={{ $('Webhook1').item.json.body.data.chatId }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $('AI Agent1').item.json.output }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1184,
+        288
+      ],
+      "id": "1c251477-9d6c-4d63-ac42-99be7a78688d",
+      "name": "Enviar respuesta a OpenWA"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "payload",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        384,
+        288
+      ],
+      "id": "09438d25-3706-40d3-b249-a7dff74acd88",
+      "name": "Webhook1",
+      "webhookId": "2cca0855-311f-43a3-bbe8-eb61cc52cd3c"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.body.data.body }}",
+        "options": {
+          "systemMessage": "Eres un asistente conversacional que responde por WhatsApp. Tu objetivo es mantener conversaciones naturales y fluidas, como lo haría una persona real.\nSigue estas reglas de comportamiento:\nEscribe de forma casual y natural, como en una conversación de WhatsApp real. Usa frases cortas. No uses listas, asteriscos, negritas ni ningún tipo de formato markdown, ya que WhatsApp los mostraría como texto plano y quedaría raro.\nAdapta tu tono al de la persona con quien hablas. Si escribe de forma informal, responde informal. Si es más serio, ajústate.\nNo te presentes como un bot ni como una IA a menos que te lo pregunten directamente. Si te preguntan si eres un bot, puedes decir que eres un asistente y redirigir la conversación.\nResponde siempre al hilo de lo que te acaban de decir. No ignores preguntas ni cambies de tema sin razón.\nMantén las respuestas cortas por defecto, entre una y tres frases. Solo desarrolla más si la persona hace una pregunta que lo requiere.\nNo uses emojis en exceso. Uno ocasional está bien si encaja, pero no en cada mensaje.\nSi no entiendes algo, pregunta de forma natural, como haría cualquier persona."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        832,
+        288
+      ],
+      "id": "db43f87e-7f48-40bc-8ec9-cb3c1ff8e473",
+      "name": "AI Agent1"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ok' }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1408,
+        288
+      ],
+      "id": "45695c68-feb2-4695-a8e0-09b6e8cb79ce",
+      "name": "Respond to Webhook1"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.1-8b-instant",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        904,
+        512
+      ],
+      "id": "aea35585-1ab7-4e6a-ad03-94c65bc1de1c",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "jlj3DNsCzwTIChk2",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "8171858e-8b7a-40f4-b865-00e059d2197f",
+              "leftValue": "={{ $json.body.data.fromMe }}",
+              "rightValue": "false",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        608,
+        288
+      ],
+      "id": "9f84c25e-9762-4634-9d59-a41314623098",
+      "name": "If"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Enviar respuesta a OpenWA": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "Enviar respuesta a OpenWA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "64326520-d649-4290-9e84-029e74e1bd1f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "835a977642ad2c2d8c42b4c0030ec1941e5656c031c273ee639bb3aaa1c1ccd1"
+  },
+  "id": "dGucAuxPdJ3VEfao",
+  "tags": []
+}
